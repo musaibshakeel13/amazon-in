@@ -1,1 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NMSHE Climate Geo-Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body { margin:0; font-family:Arial; background:#eef2f5; }
+header { background:#003366; color:#fff; padding:12px; text-align:center; font-size:20px; }
+
+#alertBanner { display:none; padding:10px; text-align:center; font-weight:bold; }
+.alert-heat{background:#b71c1c;color:#fff;}
+.alert-cold{background:#263238;color:#fff;}
+.alert-rain{background:#0d47a1;color:#fff;}
+
+.panel { background:#fff; padding:10px; border-radius:6px; margin:10px auto; max-width:1100px; }
+.hidden { display:none; }
+
+#map { height:420px; border-radius:8px; }
+
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { border:1px solid #ccc; padding:6px; }
+button, select, input { padding:6px; margin:4px; }
+</style>
+</head>
+
+<body>
+
+<header>🌏 NMSHE Climate & Geo-Spatial Monitoring Portal</header>
+<div id="alertBanner"></div>
+
+<!-- LOGIN -->
+<div id="loginBox" class="panel">
+<h3>🔐 Login</h3>
+<select id="role">
+  <option value="viewer">Viewer</option>
+  <option value="admin">Admin</option>
+</select>
+<input type="password" id="pwd" placeholder="Password">
+<button onclick="login()">Login</button>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="hidden">
+
+<div class="panel">
+<b>Role:</b> <span id="userRole"></span>
+<button onclick="getLocation()">📍 Get Live Data</button>
+<button id="exportBtn" onclick="exportLogs()">⬇ Export Logs</button>
+</div>
+
+<div id="map" class="panel"></div>
+
+<div class="panel">
+<h4>📍 Location</h4>
+<div id="lat">Latitude: --</div>
+<div id="lon">Longitude: --</div>
+<div id="place">Place: --</div>
+</div>
+
+<div class="panel">
+<h4>🌦 Live Climate Data</h4>
+<div id="temp">Temperature: --</div>
+<div id="humidity">Humidity: --</div>
+<div id="weather">Weather: --</div>
+</div>
+
+<div class="panel">
+<h4>📋 Audit Logs</h4>
+<table>
+<thead>
+<tr><th>User</th><th>Role</th><th>Action</th><th>Time</th></tr>
+</thead>
+<tbody id="logs"></tbody>
+</table>
+</div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ================= CONFIG ================= */
+const API_KEY = "4d7f263908ac1c04574dc6eb9ee095be";
+const ADMIN_PWD = "Musaib123";
+const VIEWER_PWD = "viewer123";
+
+/* ================= GLOBAL ================= */
+let currentRole="", map, marker;
+let logs=[];
+let baseLayer, rainLayer, terrainLayer, sentinelLayer, pressureLayer, windLayer, cloudsLayer;
+
+/* ================= LOGIN ================= */
+function login() {
+  const role=document.getElementById("role").value;
+  const pwd=document.getElementById("pwd").value;
+
+  if ((role==="admin" && pwd!==ADMIN_PWD) ||
+      (role==="viewer" && pwd!==VIEWER_PWD)) {
+    alert("Invalid credentials"); return;
+  }
+
+  currentRole=role;
+  document.getElementById("userRole").innerText=role.toUpperCase();
+  document.getElementById("loginBox").classList.add("hidden");
+  document.getElementById("dashboard").classList.remove("hidden");
+
+  if(role==="viewer") document.getElementById("exportBtn").disabled=true;
+
+  initMap();
+  logAction("Logged in");
+}
+
+/* ================= MAP ================= */
+function initMap() {
+  map = L.map("map").setView([33.7, 75.3], 7);
+
+  // Base layer
+  baseLayer = L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { attribution: "© OpenStreetMap" }
+  ).addTo(map);
+
+  // Terrain layer
+  terrainLayer = L.tileLayer(
+    "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+    { attribution: "© OpenTopoMap" }
+  );
+
+  // Sentinel layer (replace YOUR_SENTINEL_INSTANCE_ID)
+  sentinelLayer = L.tileLayer.wms(
+    "https://services.sentinel-hub.com/ogc/wms/YOUR_SENTINEL_INSTANCE_ID",
+    {
+      layers: "TRUE_COLOR",
+      format: "image/png",
+      transparent: false,
+      attribution: "© Sentinel Hub"
+    }
+  );
+
+  // Rain layer
+  rainLayer = L.tileLayer(
+    "https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=" + API_KEY,
+    { opacity: 0.7 }
+  );
+
+  // Pressure layer
+  pressureLayer = L.tileLayer(
+    "https://tile.openweathermap.org/map/pressure_new/{z}/{x}/{y}.png?appid=" + API_KEY,
+    { opacity: 0.5 }
+  );
+
+  // Wind layer
+  windLayer = L.tileLayer(
+    "https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=" + API_KEY,
+    { opacity: 0.5 }
+  );
+
+  // Clouds layer
+  cloudsLayer = L.tileLayer(
+    "https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=" + API_KEY,
+    { opacity: 0.5 }
+  );
+
+  // Layer control
+  L.control.layers(
+    {
+      "🗺 OpenStreetMap": baseLayer,
+      "⛰ Terrain": terrainLayer,
+      "🛰 Sentinel (Satellite)": sentinelLayer
+    },
+    {
+      "🌧 Rainfall (Live)": rainLayer,
+      "💨 Wind": windLayer,
+      "🌡 Pressure": pressureLayer,
+      "☁ Clouds": cloudsLayer
+    }
+  ).addTo(map);
+}
+
+/* ================= LOCATION ================= */
+function getLocation(){
+  navigator.geolocation.getCurrentPosition(success,()=>alert("Location denied"));
+}
+
+/* ================= WEATHER ================= */
+function success(pos){
+  const lat=pos.coords.latitude;
+  const lon=pos.coords.longitude;
+
+  document.getElementById("lat").innerText="Latitude: "+lat.toFixed(6);
+  document.getElementById("lon").innerText="Longitude: "+lon.toFixed(6);
+
+  if(marker) map.removeLayer(marker);
+  marker=L.marker([lat,lon]).addTo(map)
+    .bindPopup(`Lat: ${lat.toFixed(4)}<br>Lon: ${lon.toFixed(4)}`)
+    .openPopup();
+
+  map.setView([lat,lon],10);
+
+  fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${API_KEY}`)
+  .then(r=>r.json())
+  .then(d=>{
+    document.getElementById("temp").innerText="Temperature: "+d.main.temp+" °C";
+    document.getElementById("humidity").innerText="Humidity: "+d.main.humidity+" %";
+    document.getElementById("weather").innerText="Weather: "+d.weather[0].description;
+    checkAlerts(d);
+    logAction("Viewed weather data");
+  });
+
+  fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+  .then(r=>r.json())
+  .then(p=>document.getElementById("place").innerText="Place: "+p.display_name);
+}
+
+/* ================= ALERTS ================= */
+function checkAlerts(w){
+  const b=document.getElementById("alertBanner");
+  b.style.display="none";
+
+  if(w.main.temp>=40) triggerAlert("🔥 HEATWAVE ALERT","alert-heat");
+  else if(w.main.temp<=5) triggerAlert("❄ COLD WAVE ALERT","alert-cold");
+  else if(w.rain && w.rain["1h"]>=50) triggerAlert("🌧 HEAVY RAINFALL ALERT","alert-rain");
+}
+
+function triggerAlert(msg,cls){
+  const b=document.getElementById("alertBanner");
+  b.className=cls;
+  b.innerText=msg;
+  b.style.display="block";
+  alert(msg);
+  logAction(msg);
+}
+
+/* ================= AUDIT LOGS ================= */
+function logAction(action){
+  const t=new Date().toLocaleString();
+  logs.push({user:currentRole,role:currentRole,action,time:t});
+  renderLogs();
+}
+
+function renderLogs(){
+  const tb=document.getElementById("logs");
+  tb.innerHTML="";
+  logs.forEach(l=>{
+    tb.innerHTML+=`<tr><td>${l.user}</td><td>${l.role}</td><td>${l.action}</td><td>${l.time}</td></tr>`;
+  });
+}
+
+function exportLogs(){
+  if(currentRole!=="admin") return;
+  let csv="User,Role,Action,Time\n";
+  logs.forEach(l=>csv+=`${l.user},${l.role},${l.action},${l.time}\n`);
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download="audit_logs.csv";
+  a.click();
+  logAction("Exported audit logs");
+}
+</script>
+</body>
+  </html>
+
+
+  
+
+
+  
+
+
+  
+
+  
+
+  
